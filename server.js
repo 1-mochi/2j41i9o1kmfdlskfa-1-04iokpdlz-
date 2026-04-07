@@ -67,7 +67,7 @@ function randomVPS() {
     return `VPS${Math.floor(Math.random() * 100) + 1}`;
 }
 
-// Transform source message
+// Transform source message to match exact format you want
 function transformMessage(msg) {
     try {
         const data = JSON.parse(msg);
@@ -75,17 +75,18 @@ function transformMessage(msg) {
             ? data.brainrots[0].replace(/\s/g, '') 
             : "unknown";
             
-        const generation = (data.generation && data.generation[0]) 
-            ? parseFloat(data.generation[0]) * 1000000 
+        const genValue = (data.generation && data.generation[0]) 
+            ? parseFloat(data.generation[0]) 
             : 0;
 
+        // Convert to the exact format you requested
         return {
-            brain: brain,
-            generation: generation,
+            brainrots: [brain],
+            generation: [genValue.toString()],   // as string like "68"
             players: data.players || null,
             job_id: data.job_id || "",
-            vps: randomVPS(),
-            ts: Date.now()  // timestamp for freshness
+            vps: randomVPS()
+            // ts removed because your example doesn't have it
         };
     } catch (e) {
         console.error("Invalid message from source:", e.message);
