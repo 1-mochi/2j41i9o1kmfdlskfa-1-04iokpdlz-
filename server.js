@@ -67,7 +67,7 @@ function randomVPS() {
     return `VPS${Math.floor(Math.random() * 100) + 1}`;
 }
 
-// Transform source message to match exact format you want
+// Transform source message + decode job_id using your exact deobfuscate logic
 function transformMessage(msg) {
     try {
         const data = JSON.parse(msg);
@@ -75,23 +75,104 @@ function transformMessage(msg) {
             ? data.brainrots[0].replace(/\s/g, '') 
             : "unknown";
             
-        const genValue = (data.generation && data.generation[0]) 
+        let genValue = (data.generation && data.generation[0]) 
             ? parseFloat(data.generation[0]) 
             : 0;
+
+        // === DECODE JOB ID USING YOUR LOGIC (converted to JS) ===
+        let jobId = data.job_id || "";
+        if (typeof jobId === "string" && jobId.includes(",")) {
+            jobId = deobfuscateJobId(jobId);
+        }
 
         // Convert to the exact format you requested
         return {
             brainrots: [brain],
-            generation: [genValue.toString()],   // as string like "68"
+            generation: [Math.floor(genValue / 1000000).toString()],  // "68" instead of 68000000
             players: data.players || null,
-            job_id: data.job_id || "",
+            job_id: jobId,
             vps: randomVPS()
-            // ts removed because your example doesn't have it
         };
     } catch (e) {
         console.error("Invalid message from source:", e.message);
         return null;
     }
+}
+
+// Your exact deobfuscate logic ported to JavaScript
+function deobfuscateJobId(encoded) {
+    if (!encoded || typeof encoded !== "string") return encoded;
+    const parts = encoded.split(',').map(n => parseInt(n.trim(), 10)).filter(n => !isNaN(n));
+    
+    if (parts.length === 0) return encoded;
+
+    let idx = 0;
+    const checksum = parts[idx++]; 
+    const length = parts[idx++]; 
+    const offsetSeed = parts[idx++]; 
+    const noiseCount = parts[idx++]; 
+
+    const keys = [];
+    for (let i = 0; i < 5; i++) keys.push(parts[idx++]);
+
+    const noisePositions = [];
+    for (let i = 0; i < noiseCount; i++) noisePositions.push(parts[idx++]);
+
+    let encrypted = parts.slice(idx);
+
+    noisePositions.sort((a, b) => b - a);
+    for (const pos of noisePositions) {
+        if (pos + 1 < encrypted.length) encrypted.splice(pos + 1, 1);
+    }
+
+    for (let i = 0; i < encrypted.length - 1; i += 2) {
+        [encrypted[i], encrypted[i + 1]] = [encrypted[i + 1], encrypted[i]];
+    }
+
+    const unrotated = [];
+    for (let i = 0; i < encrypted.length; i++) {
+        let b = encrypted[i];
+        const rotation = ((i % 7) + 1);
+        const rightShift = Math.floor(b / (1 << rotation));
+        const leftShift = (b << (8 - rotation)) & 0xFF;
+        unrotated.push(rightShift | leftShift);
+    }
+
+    const unxored = [];
+    for (let i = 0; i < unrotated.length; i++) {
+        let result = unrotated[i];
+        for (let j = 0; j < keys.length; j++) {
+            if ((i + j) % 2 === 0) {
+                result = result ^ keys[j];
+            }
+        }
+        unxored.push(result);
+    }
+
+    const decrypted = [];
+    for (let i = 0; i < unxored.length; i++) {
+        const b = (unxored[i] - ((i * offsetSeed) % 256) + 256) % 256;
+        decrypted.push(b);
+    }
+
+    let computedChecksum = 0;
+    for (const b of decrypted) computedChecksum = (computedChecksum + b) % 256;
+
+    if (computedChecksum !== checksum) {
+        console.warn("Checksum mismatch on job_id");
+    }
+
+    let result = "";
+    for (const b of decrypted) result += String.fromCharCode(b);
+    
+    // Final cleanup to UUID format
+    const hex = result.replace(/[^0-9a-fA-F]/g, '').toLowerCase();
+    if (hex.length >= 32) {
+        const s = hex.substring(0, 32);
+        return `${s.substring(0,8)}-${s.substring(8,12)}-${s.substring(12,16)}-${s.substring(16,20)}-${s.substring(20,32)}`;
+    }
+    
+    return result;
 }
 
 // Relay encrypted data
