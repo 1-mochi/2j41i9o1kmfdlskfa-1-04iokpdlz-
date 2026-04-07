@@ -1,97 +1,152 @@
 const WebSocket = require('ws');
+const crypto = require('crypto');
 
-// Your super hard auth key
+// ==================== STRONG SECRET KEY (DO NOT SHARE) ====================
+// Generate your own with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 const SECRET_KEY = "24I19JFSDIPOFJSOARJ324I4QPHI412J41JNFESPAFHJ32I48J23RMONKFDSF093U2JRIPO2;532N4234JI4OOJIFWFJOISJF";
 
+const SALT = "RyHub-Salt-2026-v2-x7K9pQ2mZ8vL4nT6wR";
 const PORT = process.env.PORT || 8080;
+
+// Derive a strong 32-byte key using PBKDF2
+const ENCRYPTION_KEY = crypto.pbkdf2Sync(SECRET_KEY, SALT, 100000, 32, 'sha512');
+
 const wss = new WebSocket.Server({ port: PORT });
 
-console.log(`Server running on port ${PORT}`);
+console.log(`🚀 Secure Relay Server running on port ${PORT}`);
+console.log(`🔐 Encryption: AES-256-GCM (stronger than XOR)`);
+console.log(`⚠️  Keep SECRET_KEY private!`);
 
 // Connect to source WebSocket
-const sourceWS = new WebSocket('wss://rrari.rexzy.online'); // or any source
+const sourceWS = new WebSocket('wss://rrari.rexzy.online');
 
-sourceWS.on('open', () => console.log('Connected to source WebSocket'));
-sourceWS.on('error', (err) => console.error('Source WS error:', err));
-sourceWS.on('close', () => console.log('Source WS disconnected'));
+sourceWS.on('open', () => console.log('✅ Connected to source WebSocket'));
+sourceWS.on('error', (err) => console.error('❌ Source WS error:', err));
+sourceWS.on('close', () => console.log('⚠️ Source WS disconnected'));
 
-// XOR encryption function (repeating key)
-function xorEncrypt(str, key) {
-    const keyBytes = Buffer.from(key);
-    const data = Buffer.from(str);
-    const encrypted = Buffer.alloc(data.length);
-
-    for (let i = 0; i < data.length; i++) {
-        encrypted[i] = data[i] ^ keyBytes[i % keyBytes.length];
+// Strong AES-256-GCM encryption
+function encrypt(data) {
+    try {
+        const iv = crypto.randomBytes(12);
+        const cipher = crypto.createCipheriv('aes-256-gcm', ENCRYPTION_KEY, iv);
+        
+        let encrypted = cipher.update(JSON.stringify(data), 'utf8');
+        encrypted = Buffer.concat([encrypted, cipher.final()]);
+        
+        const authTag = cipher.getAuthTag();
+        const combined = Buffer.concat([iv, encrypted, authTag]);
+        
+        return combined.toString('base64');
+    } catch (e) {
+        console.error("Encryption failed:", e.message);
+        return null;
     }
-    return encrypted.toString('base64'); // Send as base64
 }
 
-// Random VPS between VPS1–VPS100
+// AES-256-GCM decryption (for clients)
+function decrypt(encryptedBase64) {
+    try {
+        const combined = Buffer.from(encryptedBase64, 'base64');
+        const iv = combined.slice(0, 12);
+        const ciphertext = combined.slice(12, -16);
+        const authTag = combined.slice(-16);
+        
+        const decipher = crypto.createDecipheriv('aes-256-gcm', ENCRYPTION_KEY, iv);
+        decipher.setAuthTag(authTag);
+        
+        let decrypted = decipher.update(ciphertext);
+        decrypted = Buffer.concat([decrypted, decipher.final()]);
+        
+        return JSON.parse(decrypted.toString('utf8'));
+    } catch (e) {
+        console.error("Decryption failed:", e.message);
+        return null;
+    }
+}
+
+// Random VPS generator
 function randomVPS() {
     return `VPS${Math.floor(Math.random() * 100) + 1}`;
 }
 
-// Transform incoming messages
+// Transform source message
 function transformMessage(msg) {
     try {
         const data = JSON.parse(msg);
-        const brain = (data.brainrots && data.brainrots[0]) ? data.brainrots[0].replace(/\s/g,'') : "unknown";
-        const generation = (data.generation && data.generation[0]) ? parseFloat(data.generation[0]) * 1000000 : 0;
-        const job_id = data.job_id || "";
-        const vps = randomVPS();
+        const brain = (data.brainrots && data.brainrots[0]) 
+            ? data.brainrots[0].replace(/\s/g, '') 
+            : "unknown";
+            
+        const generation = (data.generation && data.generation[0]) 
+            ? parseFloat(data.generation[0]) * 1000000 
+            : 0;
 
         return {
             brain: brain,
             generation: generation,
             players: data.players || null,
-            job_id: job_id,
-            vps: vps
+            job_id: data.job_id || "",
+            vps: randomVPS(),
+            ts: Date.now()  // timestamp for freshness
         };
-    } catch(e) {
+    } catch (e) {
         console.error("Invalid message from source:", e.message);
         return null;
     }
 }
 
-// Relay from source WebSocket to authenticated clients
+// Relay encrypted data
 sourceWS.on('message', (msg) => {
     const formatted = transformMessage(msg);
     if (!formatted) return;
 
-    const encrypted = xorEncrypt(JSON.stringify(formatted), SECRET_KEY);
+    const encrypted = encrypt(formatted);
+    if (!encrypted) return;
 
+    let count = 0;
     wss.clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN && client.isAuthenticated) {
             client.send(encrypted);
+            count++;
         }
     });
+
+    if (count > 0) console.log(`📤 Encrypted update sent to ${count} client(s)`);
 });
 
-// Handle incoming clients
+// Client connection handler
 wss.on('connection', (ws, req) => {
-    console.log('Client connected');
+    console.log('📡 Client connected');
     ws.isAuthenticated = false;
 
-    // Auth via JSON
-    if (req.url.startsWith('/auth/')) {
+    // URL auth support
+    if (req.url && req.url.startsWith('/auth/')) {
         const provided = decodeURIComponent(req.url.split('/auth/')[1]);
         if (provided === SECRET_KEY) {
             ws.isAuthenticated = true;
-            ws.send(JSON.stringify({ success: "Authenticated via URL!" }));
+            ws.send(JSON.stringify({ 
+                success: "✅ Authenticated via URL (AES-256-GCM)",
+                note: "All messages are now strongly encrypted"
+            }));
+            console.log('🔑 Client authenticated (URL)');
+            return;
         } else {
-            ws.send(JSON.stringify({ error: "Unauthorized via URL" }));
-            ws.close();
+            ws.send(JSON.stringify({ error: "❌ Unauthorized" }));
+            ws.close(1008, "Bad key");
+            return;
         }
-    } else {
-        ws.send(JSON.stringify({ info: "Send { auth: 'YOUR_SECRET' } to authenticate" }));
     }
+
+    ws.send(JSON.stringify({ 
+        info: "🔒 Send JSON: {\"auth\": \"YOUR_SECRET_KEY_HERE\"} to authenticate",
+        encryption: "AES-256-GCM"
+    }));
 
     ws.on('message', (msg) => {
         let data;
         try {
             data = JSON.parse(msg);
-        } catch(e) {
+        } catch (e) {
             ws.send(JSON.stringify({ error: "Invalid JSON" }));
             return;
         }
@@ -99,16 +154,20 @@ wss.on('connection', (ws, req) => {
         if (!ws.isAuthenticated) {
             if (data.auth === SECRET_KEY) {
                 ws.isAuthenticated = true;
-                ws.send(JSON.stringify({ success: "Authenticated! You will receive encrypted messages." }));
+                ws.send(JSON.stringify({ 
+                    success: "✅ Authenticated successfully!",
+                    message: "You will now receive AES-256-GCM encrypted brainrot data."
+                }));
+                console.log('🔑 Client authenticated via message');
             } else {
-                ws.send(JSON.stringify({ error: "Unauthorized. Wrong auth." }));
-                return;
+                ws.send(JSON.stringify({ error: "❌ Wrong secret key" }));
+                console.log('🚫 Failed authentication attempt');
             }
         } else {
-            // Authenticated clients cannot send anything else (optional)
-            ws.send(JSON.stringify({ info: "Server only relays source messages." }));
+            ws.send(JSON.stringify({ info: "This relay only sends encrypted data from source." }));
         }
     });
 
-    ws.on('close', () => console.log('Client disconnected'));
+    ws.on('close', () => console.log('👋 Client disconnected'));
 });
+
