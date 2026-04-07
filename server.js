@@ -13,9 +13,7 @@ const ENCRYPTION_KEY = crypto.pbkdf2Sync(SECRET_KEY, SALT, 100000, 32, 'sha512')
 
 const wss = new WebSocket.Server({ port: PORT });
 
-console.log(`🚀 Secure Relay Server running on port ${PORT}`);
-console.log(`🔐 Encryption: AES-256-GCM (stronger than XOR)`);
-console.log(`⚠️  Keep SECRET_KEY private!`);
+
 
 // Connect to source WebSocket
 const sourceWS = new WebSocket('wss://rrari.rexzy.online');
@@ -126,7 +124,7 @@ wss.on('connection', (ws, req) => {
             ws.isAuthenticated = true;
             ws.send(JSON.stringify({ 
                 success: "✅ Authenticated via URL (AES-256-GCM)",
-                note: "All messages are now strongly encrypted"
+                note: ""
             }));
             console.log('🔑 Client authenticated (URL)');
             return;
@@ -156,7 +154,7 @@ wss.on('connection', (ws, req) => {
                 ws.isAuthenticated = true;
                 ws.send(JSON.stringify({ 
                     success: "✅ Authenticated successfully!",
-                    message: "You will now receive AES-256-GCM encrypted brainrot data."
+                    message: "cool"
                 }));
                 console.log('🔑 Client authenticated via message');
             } else {
@@ -164,7 +162,7 @@ wss.on('connection', (ws, req) => {
                 console.log('🚫 Failed authentication attempt');
             }
         } else {
-            ws.send(JSON.stringify({ info: "This relay only sends encrypted data from source." }));
+            ws.send(JSON.stringify({ info: "tuff?" }));
         }
     });
 
