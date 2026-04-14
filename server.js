@@ -2,15 +2,12 @@ const WebSocket = require('ws');
 const crypto = require('crypto');
 const https = require('https');
 
-// ==================== STRONG SECRET KEY (DO NOT SHARE) ====================
-// Generate your own with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 const SECRET_KEY = "24I19JFSDIPOFJSOARJ324I4QPHI412J41JNFESPAFHJ32I48J23RMONKFDSF093U2JRIPO2;532N4234JI4OOJIFWFJOISJF";
 
 const SALT = "RyHub-Salt-2026-v2-x7K9pQ2mZ8vL4nT6wR";
 const PORT = process.env.PORT || 8080;
 const SOURCE_WS_URL = "wss://ws.vanishnotifier.org/recent";
 
-// Derive a strong 32-byte key using PBKDF2
 const ENCRYPTION_KEY = crypto.pbkdf2Sync(SECRET_KEY, SALT, 100000, 32, 'sha512');
 
 const wss = new WebSocket.Server({ port: PORT });
@@ -20,7 +17,6 @@ const wss = new WebSocket.Server({ port: PORT });
 const SOURCE_URL = 'https://ws.vanishnotifier.org/recent';
 const POLL_INTERVAL_MS = 3000;
 
-// AES-256-GCM encryption for job_id only
 function encryptJobId(jobId) {
     try {
         const iv = crypto.randomBytes(12);
@@ -32,14 +28,13 @@ function encryptJobId(jobId) {
         const authTag = cipher.getAuthTag();
         const combined = Buffer.concat([iv, encrypted, authTag]);
         
-        return combined.toString('base64'); // clients can decrypt with same key if needed
+        return combined.toString('base64');
     } catch (e) {
         console.error("Job ID encryption failed:", e.message);
         return null;
     }
 }
 
-// Optional helper if this server ever needs to decode encrypted job_id
 function decryptJobId(encryptedBase64) {
     try {
         const combined = Buffer.from(encryptedBase64, 'base64');
@@ -60,12 +55,10 @@ function decryptJobId(encryptedBase64) {
     }
 }
 
-// Random VPS generator
 function randomVPS() {
     return `VPS${Math.floor(Math.random() * 100) + 1}`;
 }
 
-// Transform source message/object + decode job_id using your exact deobfuscate logic
 function transformMessage(input) {
     try {
         const data = typeof input === "string" ? JSON.parse(input) : input;
@@ -77,7 +70,6 @@ function transformMessage(input) {
             ? parseFloat(data.generation[0])
             : Number(data.value || 0);
 
-        // === DECODE JOB ID USING YOUR LOGIC (converted to JS) ===
         let jobId = data.job_id || "";
         if (typeof jobId === "string" && jobId.includes(",")) {
             jobId = deobfuscateJobId(jobId);
@@ -85,10 +77,9 @@ function transformMessage(input) {
 
         const encryptedJobId = jobId ? encryptJobId(jobId) : null;
 
-        // Convert to output format (only job_id encrypted)
         return {
             brainrots: [brain],
-            generation: [Math.floor(genValue / 1000000).toString()],  // "68" instead of 68000000
+            generation: [Math.floor(genValue / 1000000).toString()],
             players: data.players || null,
             job_id: encryptedJobId,
             vps: randomVPS()
@@ -99,7 +90,6 @@ function transformMessage(input) {
     }
 }
 
-// Your exact deobfuscate logic ported to JavaScript
 function deobfuscateJobId(encoded) {
     if (!encoded || typeof encoded !== "string") return encoded;
     const parts = encoded.split(',').map(n => parseInt(n.trim(), 10)).filter(n => !isNaN(n));
@@ -158,14 +148,9 @@ function deobfuscateJobId(encoded) {
     let computedChecksum = 0;
     for (const b of decrypted) computedChecksum = (computedChecksum + b) % 256;
 
-    if (computedChecksum !== checksum) {
-        console.warn("Checksum mismatch on job_id");
-    }
-
     let result = "";
     for (const b of decrypted) result += String.fromCharCode(b);
     
-    // Final cleanup to UUID format
     const hex = result.replace(/[^0-9a-fA-F]/g, '').toLowerCase();
     if (hex.length >= 32) {
         const s = hex.substring(0, 32);
@@ -246,7 +231,6 @@ async function pollSourceAndRelay() {
         const payload = await fetchRecent();
         const items = Array.isArray(payload) ? payload : [payload];
 
-        // Send older items first within the same poll so clients receive stable order.
         for (let i = items.length - 1; i >= 0; i--) {
             const item = items[i];
             if (!item || typeof item !== "object") continue;
@@ -320,17 +304,12 @@ function connectSourceWebSocket() {
     });
 }
 
-// Source mode is intentionally disabled because this host is Cloudflare-protected.
-// Direct server-side HTTP/WS access returns 403 "Just a moment...".
-console.warn("⚠️ Source feed disabled: ws.vanishnotifier.org is website-protected (Cloudflare 403).");
-console.warn("⚠️ Use an official API endpoint/key or a browser-side collector that forwards data here.");
+connectSourceWebSocket();
 
-// Client connection handler
 wss.on('connection', (ws, req) => {
     console.log('📡 Client connected');
     ws.isAuthenticated = false;
 
-    // URL auth support
     if (req.url && req.url.startsWith('/auth/')) {
         const provided = decodeURIComponent(req.url.split('/auth/')[1]);
         if (provided === SECRET_KEY) {
