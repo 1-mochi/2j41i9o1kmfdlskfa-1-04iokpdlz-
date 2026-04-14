@@ -6,7 +6,7 @@ const SECRET_KEY = "24I19JFSDIPOFJSOARJ324I4QPHI412J41JNFESPAFHJ32I48J23RMONKFDS
 
 const SALT = "RyHub-Salt-2026-v2-x7K9pQ2mZ8vL4nT6wR";
 const PORT = process.env.PORT || 8080;
-const SOURCE_WS_URL = "wss://ws.vanishnotifier.org/recent";
+const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS) || 2000;
 
 const ENCRYPTION_KEY = crypto.pbkdf2Sync(SECRET_KEY, SALT, 100000, 32, 'sha512');
 
@@ -14,8 +14,7 @@ const wss = new WebSocket.Server({ port: PORT });
 
 
 
-const SOURCE_URL = 'https://ws.vanishnotifier.org/recent';
-const POLL_INTERVAL_MS = 3000;
+const SOURCE_URL = "https://ws.vanishnotifier.org/recent";
 
 function encryptJobId(jobId) {
     try {
@@ -226,10 +225,17 @@ function makeItemKey(item) {
     return `${item.timestamp || "0"}:${item.job_id || ""}:${item.name || item.base_name || ""}`;
 }
 
+function itemsFromApiPayload(payload) {
+    if (!payload || typeof payload !== "object") return [];
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload.findings)) return payload.findings;
+    return [payload];
+}
+
 async function pollSourceAndRelay() {
     try {
         const payload = await fetchRecent();
-        const items = Array.isArray(payload) ? payload : [payload];
+        const items = itemsFromApiPayload(payload);
 
         for (let i = items.length - 1; i >= 0; i--) {
             const item = items[i];
@@ -254,57 +260,8 @@ async function pollSourceAndRelay() {
     }
 }
 
-function handleSourcePayload(payload) {
-    const items = Array.isArray(payload) ? payload : [payload];
-
-    for (let i = items.length - 1; i >= 0; i--) {
-        const item = items[i];
-        if (!item || typeof item !== "object") continue;
-
-        const key = makeItemKey(item);
-        if (seenKeys.has(key)) continue;
-
-        const formatted = transformMessage(item);
-        if (!formatted) continue;
-
-        seenKeys.add(key);
-        if (seenKeys.size > MAX_SEEN_KEYS) {
-            const firstKey = seenKeys.values().next().value;
-            seenKeys.delete(firstKey);
-        }
-
-        broadcastFormatted(formatted);
-    }
-}
-
-function connectSourceWebSocket() {
-    console.log(`🔌 Connecting source WebSocket: ${SOURCE_WS_URL}`);
-    const sourceWS = new WebSocket(SOURCE_WS_URL);
-
-    sourceWS.on("open", () => {
-        console.log("✅ Source WebSocket connected");
-    });
-
-    sourceWS.on("message", (msg) => {
-        try {
-            const payload = JSON.parse(msg.toString());
-            handleSourcePayload(payload);
-        } catch (err) {
-            console.error("❌ Invalid source WS JSON:", err.message);
-        }
-    });
-
-    sourceWS.on("error", (err) => {
-        console.error("❌ Source WS error:", err.message);
-    });
-
-    sourceWS.on("close", () => {
-        console.log("⚠️ Source WS disconnected, retrying in 5s...");
-        setTimeout(connectSourceWebSocket, 5000);
-    });
-}
-
-connectSourceWebSocket();
+pollSourceAndRelay();
+setInterval(pollSourceAndRelay, POLL_INTERVAL_MS);
 
 wss.on('connection', (ws, req) => {
     console.log('📡 Client connected');
