@@ -16,33 +16,33 @@ const wss = new WebSocket.Server({ port: PORT });
 
 
 // Connect to source WebSocket
-const sourceWS = new WebSocket('wss://rrari.rexzy.online');
+const sourceWS = new WebSocket('wss://ws.vanishnotifier.org/recent');
 
 sourceWS.on('open', () => console.log('✅ Connected to source WebSocket'));
 sourceWS.on('error', (err) => console.error('❌ Source WS error:', err));
 sourceWS.on('close', () => console.log('⚠️ Source WS disconnected'));
 
-// Strong AES-256-GCM encryption
-function encrypt(data) {
+// AES-256-GCM encryption for job_id only
+function encryptJobId(jobId) {
     try {
         const iv = crypto.randomBytes(12);
         const cipher = crypto.createCipheriv('aes-256-gcm', ENCRYPTION_KEY, iv);
         
-        let encrypted = cipher.update(JSON.stringify(data), 'utf8');
+        let encrypted = cipher.update(String(jobId ?? ""), 'utf8');
         encrypted = Buffer.concat([encrypted, cipher.final()]);
         
         const authTag = cipher.getAuthTag();
         const combined = Buffer.concat([iv, encrypted, authTag]);
         
-        return combined.toString('base64');
+        return combined.toString('base64'); // clients can decrypt with same key if needed
     } catch (e) {
-        console.error("Encryption failed:", e.message);
+        console.error("Job ID encryption failed:", e.message);
         return null;
     }
 }
 
-// AES-256-GCM decryption (for clients)
-function decrypt(encryptedBase64) {
+// Optional helper if this server ever needs to decode encrypted job_id
+function decryptJobId(encryptedBase64) {
     try {
         const combined = Buffer.from(encryptedBase64, 'base64');
         const iv = combined.slice(0, 12);
@@ -55,9 +55,9 @@ function decrypt(encryptedBase64) {
         let decrypted = decipher.update(ciphertext);
         decrypted = Buffer.concat([decrypted, decipher.final()]);
         
-        return JSON.parse(decrypted.toString('utf8'));
+        return decrypted.toString('utf8');
     } catch (e) {
-        console.error("Decryption failed:", e.message);
+        console.error("Job ID decryption failed:", e.message);
         return null;
     }
 }
@@ -85,12 +85,14 @@ function transformMessage(msg) {
             jobId = deobfuscateJobId(jobId);
         }
 
-        // Convert to the exact format you requested
+        const encryptedJobId = jobId ? encryptJobId(jobId) : null;
+
+        // Convert to output format (only job_id encrypted)
         return {
             brainrots: [brain],
             generation: [Math.floor(genValue / 1000000).toString()],  // "68" instead of 68000000
             players: data.players || null,
-            job_id: jobId,
+            job_id: encryptedJobId,
             vps: randomVPS()
         };
     } catch (e) {
@@ -175,23 +177,20 @@ function deobfuscateJobId(encoded) {
     return result;
 }
 
-// Relay encrypted data
+// Relay JSON data (only job_id is encrypted)
 sourceWS.on('message', (msg) => {
     const formatted = transformMessage(msg);
     if (!formatted) return;
 
-    const encrypted = encrypt(formatted);
-    if (!encrypted) return;
-
     let count = 0;
     wss.clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN && client.isAuthenticated) {
-            client.send(encrypted);
+            client.send(JSON.stringify(formatted));
             count++;
         }
     });
 
-    if (count > 0) console.log(`📤 Encrypted update sent to ${count} client(s)`);
+    if (count > 0) console.log(`📤 Update sent to ${count} client(s)`);
 });
 
 // Client connection handler
@@ -205,7 +204,7 @@ wss.on('connection', (ws, req) => {
         if (provided === SECRET_KEY) {
             ws.isAuthenticated = true;
             ws.send(JSON.stringify({ 
-                success: "✅ Authenticated via URL (AES-256-GCM)",
+                success: "✅ Authenticated via URL",
                 note: ""
             }));
             console.log('🔑 Client authenticated (URL)');
@@ -219,7 +218,7 @@ wss.on('connection', (ws, req) => {
 
     ws.send(JSON.stringify({ 
         info: "🔒 Send JSON: {\"auth\": \"YOUR_SECRET_KEY_HERE\"} to authenticate",
-        encryption: "AES-256-GCM"
+        encryption: "job_id only (AES-256-GCM)"
     }));
 
     ws.on('message', (msg) => {
