@@ -187,9 +187,31 @@ function broadcastFormatted(formatted) {
 
 function fetchRecent() {
     return new Promise((resolve, reject) => {
-        https.get(SOURCE_URL, (res) => {
+        const url = new URL(SOURCE_URL);
+        const req = https.get({
+            protocol: url.protocol,
+            hostname: url.hostname,
+            port: url.port || 443,
+            path: `${url.pathname}${url.search}`,
+            method: "GET",
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+                "Accept": "application/json,text/plain,*/*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "identity",
+                "Connection": "keep-alive",
+                "Referer": "https://ws.vanishnotifier.org/",
+                "Origin": "https://ws.vanishnotifier.org"
+            },
+            timeout: 10000
+        }, (res) => {
             if (res.statusCode !== 200) {
-                reject(new Error(`HTTP ${res.statusCode}`));
+                let body = "";
+                res.setEncoding("utf8");
+                res.on("data", chunk => { body += chunk; });
+                res.on("end", () => {
+                    reject(new Error(`HTTP ${res.statusCode}: ${body.slice(0, 200)}`));
+                });
                 res.resume();
                 return;
             }
@@ -204,7 +226,10 @@ function fetchRecent() {
                     reject(new Error(`Invalid JSON from source: ${e.message}`));
                 }
             });
-        }).on("error", reject);
+        });
+
+        req.on("timeout", () => req.destroy(new Error("Source request timeout")));
+        req.on("error", reject);
     });
 }
 
