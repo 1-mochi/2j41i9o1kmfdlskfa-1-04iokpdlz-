@@ -1,5 +1,6 @@
 const WebSocket = require('ws');
 const crypto = require('crypto');
+const https = require('https');
 
 // ==================== STRONG SECRET KEY (DO NOT SHARE) ====================
 // Generate your own with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
@@ -15,12 +16,8 @@ const wss = new WebSocket.Server({ port: PORT });
 
 
 
-// Connect to source WebSocket
-const sourceWS = new WebSocket('wss://ws.vanishnotifier.org/recent');
-
-sourceWS.on('open', () => console.log('✅ Connected to source WebSocket'));
-sourceWS.on('error', (err) => console.error('❌ Source WS error:', err));
-sourceWS.on('close', () => console.log('⚠️ Source WS disconnected'));
+const SOURCE_URL = 'https://ws.vanishnotifier.org/recent';
+const POLL_INTERVAL_MS = 3000;
 
 // AES-256-GCM encryption for job_id only
 function encryptJobId(jobId) {
@@ -67,17 +64,17 @@ function randomVPS() {
     return `VPS${Math.floor(Math.random() * 100) + 1}`;
 }
 
-// Transform source message + decode job_id using your exact deobfuscate logic
-function transformMessage(msg) {
+// Transform source message/object + decode job_id using your exact deobfuscate logic
+function transformMessage(input) {
     try {
-        const data = JSON.parse(msg);
-        const brain = (data.brainrots && data.brainrots[0]) 
-            ? data.brainrots[0].replace(/\s/g, '') 
-            : "unknown";
+        const data = typeof input === "string" ? JSON.parse(input) : input;
+        const brain = (data.brainrots && data.brainrots[0])
+            ? String(data.brainrots[0]).replace(/\s/g, '')
+            : (data.name || data.base_name || "unknown");
             
-        let genValue = (data.generation && data.generation[0]) 
-            ? parseFloat(data.generation[0]) 
-            : 0;
+        let genValue = (data.generation && data.generation[0])
+            ? parseFloat(data.generation[0])
+            : Number(data.value || 0);
 
         // === DECODE JOB ID USING YOUR LOGIC (converted to JS) ===
         let jobId = data.job_id || "";
@@ -177,11 +174,7 @@ function deobfuscateJobId(encoded) {
     return result;
 }
 
-// Relay JSON data (only job_id is encrypted)
-sourceWS.on('message', (msg) => {
-    const formatted = transformMessage(msg);
-    if (!formatted) return;
-
+function broadcastFormatted(formatted) {
     let count = 0;
     wss.clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN && client.isAuthenticated) {
@@ -189,9 +182,71 @@ sourceWS.on('message', (msg) => {
             count++;
         }
     });
-
     if (count > 0) console.log(`📤 Update sent to ${count} client(s)`);
-});
+}
+
+function fetchRecent() {
+    return new Promise((resolve, reject) => {
+        https.get(SOURCE_URL, (res) => {
+            if (res.statusCode !== 200) {
+                reject(new Error(`HTTP ${res.statusCode}`));
+                res.resume();
+                return;
+            }
+
+            let raw = "";
+            res.setEncoding("utf8");
+            res.on("data", chunk => { raw += chunk; });
+            res.on("end", () => {
+                try {
+                    resolve(JSON.parse(raw));
+                } catch (e) {
+                    reject(new Error(`Invalid JSON from source: ${e.message}`));
+                }
+            });
+        }).on("error", reject);
+    });
+}
+
+const seenKeys = new Set();
+const MAX_SEEN_KEYS = 1000;
+
+function makeItemKey(item) {
+    return `${item.timestamp || "0"}:${item.job_id || ""}:${item.name || item.base_name || ""}`;
+}
+
+async function pollSourceAndRelay() {
+    try {
+        const payload = await fetchRecent();
+        const items = Array.isArray(payload) ? payload : [payload];
+
+        // Send older items first within the same poll so clients receive stable order.
+        for (let i = items.length - 1; i >= 0; i--) {
+            const item = items[i];
+            if (!item || typeof item !== "object") continue;
+
+            const key = makeItemKey(item);
+            if (seenKeys.has(key)) continue;
+
+            const formatted = transformMessage(item);
+            if (!formatted) continue;
+
+            seenKeys.add(key);
+            if (seenKeys.size > MAX_SEEN_KEYS) {
+                const firstKey = seenKeys.values().next().value;
+                seenKeys.delete(firstKey);
+            }
+
+            broadcastFormatted(formatted);
+        }
+    } catch (err) {
+        console.error("❌ Source poll error:", err.message);
+    }
+}
+
+console.log(`🌐 Polling source API: ${SOURCE_URL}`);
+pollSourceAndRelay();
+setInterval(pollSourceAndRelay, POLL_INTERVAL_MS);
 
 // Client connection handler
 wss.on('connection', (ws, req) => {
