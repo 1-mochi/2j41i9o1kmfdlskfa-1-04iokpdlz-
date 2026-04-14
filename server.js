@@ -320,9 +320,10 @@ function connectSourceWebSocket() {
     });
 }
 
-// Primary source mode: WebSocket stream.
-// Note: HTTP polling can hit Cloudflare 403 from server environments.
-connectSourceWebSocket();
+// Source mode is intentionally disabled because this host is Cloudflare-protected.
+// Direct server-side HTTP/WS access returns 403 "Just a moment...".
+console.warn("⚠️ Source feed disabled: ws.vanishnotifier.org is website-protected (Cloudflare 403).");
+console.warn("⚠️ Use an official API endpoint/key or a browser-side collector that forwards data here.");
 
 // Client connection handler
 wss.on('connection', (ws, req) => {
