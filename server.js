@@ -218,12 +218,8 @@ function fetchRecent() {
     });
 }
 
-const seenKeys = new Set();
-const MAX_SEEN_KEYS = 1000;
-
-function makeItemKey(item) {
-    return `${item.timestamp || "0"}:${item.job_id || ""}:${item.name || item.base_name || ""}`;
-}
+const seenJobIds = new Set();
+const MAX_SEEN_JOB_IDS = 5000;
 
 function itemsFromApiPayload(payload) {
     if (!payload || typeof payload !== "object") return [];
@@ -232,25 +228,54 @@ function itemsFromApiPayload(payload) {
     return [payload];
 }
 
+function groupedByJobId(items) {
+    const jobs = new Map();
+    for (const item of items) {
+        if (!item || typeof item !== "object") continue;
+        const jobId = String(item.job_id || "").trim();
+        if (!jobId) continue;
+
+        if (!jobs.has(jobId)) {
+            jobs.set(jobId, []);
+        }
+        jobs.get(jobId).push(item);
+    }
+    return jobs;
+}
+
+function pickHighestValueItem(items) {
+    if (!Array.isArray(items) || items.length === 0) return null;
+    let best = items[0];
+    let bestVal = Number(best?.value || 0);
+    for (let i = 1; i < items.length; i++) {
+        const cur = items[i];
+        const curVal = Number(cur?.value || 0);
+        if (curVal > bestVal) {
+            best = cur;
+            bestVal = curVal;
+        }
+    }
+    return best;
+}
+
 async function pollSourceAndRelay() {
     try {
         const payload = await fetchRecent();
         const items = itemsFromApiPayload(payload);
+        const jobs = groupedByJobId(items);
 
-        for (let i = items.length - 1; i >= 0; i--) {
-            const item = items[i];
-            if (!item || typeof item !== "object") continue;
+        for (const [jobId, groupItems] of jobs.entries()) {
+            if (seenJobIds.has(jobId)) continue;
+            const bestItem = pickHighestValueItem(groupItems);
+            if (!bestItem) continue;
 
-            const key = makeItemKey(item);
-            if (seenKeys.has(key)) continue;
-
-            const formatted = transformMessage(item);
+            const formatted = transformMessage(bestItem);
             if (!formatted) continue;
 
-            seenKeys.add(key);
-            if (seenKeys.size > MAX_SEEN_KEYS) {
-                const firstKey = seenKeys.values().next().value;
-                seenKeys.delete(firstKey);
+            seenJobIds.add(jobId);
+            if (seenJobIds.size > MAX_SEEN_JOB_IDS) {
+                const firstKey = seenJobIds.values().next().value;
+                seenJobIds.delete(firstKey);
             }
 
             broadcastFormatted(formatted);
