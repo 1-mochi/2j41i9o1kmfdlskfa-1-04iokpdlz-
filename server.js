@@ -3,6 +3,8 @@ const crypto = require('crypto');
 const https = require('https');
 
 const SECRET_KEY = "24I19JFSDIPOFJSOARJ324I4QPHI412J41JNFESPAFHJ32I48J23RMONKFDSF093U2JRIPO2;532N4234JI4OOJIFWFJOISJF";
+const ALT_AUTH_KEY = "LDJFSIJ3I4J2IO1111";
+const VALID_AUTH_KEYS = new Set([SECRET_KEY, ALT_AUTH_KEY]);
 
 const SALT = "RyHub-Salt-2026-v2-x7K9pQ2mZ8vL4nT6wR";
 const PORT = process.env.PORT || 8080;
@@ -294,7 +296,7 @@ wss.on('connection', (ws, req) => {
 
     if (req.url && req.url.startsWith('/auth/')) {
         const provided = decodeURIComponent(req.url.split('/auth/')[1]);
-        if (provided === SECRET_KEY) {
+        if (VALID_AUTH_KEYS.has(provided)) {
             ws.isAuthenticated = true;
             ws.send(JSON.stringify({ 
                 success: "✅ Authenticated via URL",
@@ -324,7 +326,7 @@ wss.on('connection', (ws, req) => {
         }
 
         if (!ws.isAuthenticated) {
-            if (data.auth === SECRET_KEY) {
+            if (VALID_AUTH_KEYS.has(data.auth)) {
                 ws.isAuthenticated = true;
                 ws.send(JSON.stringify({ 
                     success: "✅ Authenticated successfully!",
