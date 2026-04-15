@@ -6,6 +6,17 @@ const PORT = process.env.PORT || 8080;
 const wss = new WebSocket.Server({ port: PORT });
 console.log(`✅ WS relay running on port ${PORT}`);
 
+function normalizeAuthFromUrl(rawUrl) {
+    if (!rawUrl || !rawUrl.startsWith('/auth/')) return "";
+    const noQuery = rawUrl.split('?')[0];
+    const tokenPart = noQuery.slice('/auth/'.length).replace(/\/+$/, '');
+    try {
+        return decodeURIComponent(tokenPart);
+    } catch {
+        return tokenPart;
+    }
+}
+
 function broadcastToReceivers(formatted) {
     let count = 0;
     wss.clients.forEach(client => {
@@ -14,7 +25,7 @@ function broadcastToReceivers(formatted) {
             count++;
         }
     });
-    if (count > 0) console.log(`📤 Update sent to ${count} client(s)`);
+    console.log(`📤 Broadcast from sender -> ${count} receiver(s)`);
 }
 
 wss.on('connection', (ws, req) => {
@@ -23,7 +34,7 @@ wss.on('connection', (ws, req) => {
     ws.role = null;
 
     if (req.url && req.url.startsWith('/auth/')) {
-        const provided = decodeURIComponent(req.url.split('/auth/')[1]);
+        const provided = normalizeAuthFromUrl(req.url);
         if (provided === SECRET_KEY) {
             ws.isAuthenticated = true;
             ws.role = "receiver";
@@ -91,6 +102,7 @@ wss.on('connection', (ws, req) => {
 
         if (ws.role === "sender") {
             // Sender clients publish payloads; server relays to receivers only.
+            console.log('📨 Sender message received');
             broadcastToReceivers(data);
             return;
         }
