@@ -6,7 +6,7 @@ const ENCRYPTION_KEY = "24I19JFSDIPOFJSOARJ324I4QPHI412J41JNFESPAFHJ32I48J23RMON
 const PORT = process.env.PORT || 8080;
 
 const wss = new WebSocket.Server({ port: PORT });
-console.log(WS relay running on port ${PORT});
+console.log(`WS relay running on port ${PORT}`);
 
 function sha256(buf) {
   return crypto.createHash("sha256").update(buf).digest();
@@ -49,19 +49,20 @@ function broadcastToReceivers(payload) {
       count++;
     }
   });
-  console.log(Broadcast -> ${count} receiver(s));
+  console.log(`Broadcast -> ${count} receiver(s)`);
 }
 
 function normalizeAuthFromUrl(rawUrl) {
-  if (!rawUrl  !rawUrl.startsWith("/auth/")) return "";
+  if (!rawUrl || !rawUrl.startsWith("/auth/")) return "";
   const noQuery = rawUrl.split("?")[0];
-  const tokenPart = noQuery.slice("/auth/".length).replace(//+$/, "");
+  const tokenPart = noQuery.slice("/auth/".length).replace(/\/+$/, "");
   try {
     return decodeURIComponent(tokenPart);
   } catch {
     return tokenPart;
   }
 }
+
 wss.on("connection", (ws, req) => {
   ws.role = null;
 
