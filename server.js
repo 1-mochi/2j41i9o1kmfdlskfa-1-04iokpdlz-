@@ -3,7 +3,7 @@ const crypto = require("crypto");
 
 const SENDER_AUTH_KEY = "LDJFSIJ3I4J2IO1111";
 const ENCRYPTION_KEY = "24I19JFSDIPOFJSOARJ324I4QPHI412J41JNFESPAFHJ32I48J23RMONKFDSF093U2JRIPO2;532N4234JI4OOJIFWFJOISJF";
-const PORT = process.env.PORT  8080;
+const PORT = process.env.PORT || 8080;
 
 const wss = new WebSocket.Server({ port: PORT });
 console.log(WS relay running on port ${PORT});
