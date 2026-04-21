@@ -1,8 +1,7 @@
 const WebSocket = require("ws");
 const crypto = require("crypto");
 
-const SOURCE_URL = "wss://websocket.hellgen.com
-";
+const SOURCE_URL = "wss://websocket.hellgen.com";
 const SOURCE_AUTH_KEY =
   "24I19JFSDIPOFJSOARJ324I4QPHI412J41JNFESPAFHJ32I48J23RMONKFDSF093U2JRIPO2;532N4234JI4OOJIFWFJOISJF";
 const ENCRYPTION_KEY =
